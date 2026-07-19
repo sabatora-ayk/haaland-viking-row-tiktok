@@ -101,6 +101,71 @@ const handlers = {
 
 ---
 
+## 不具合修正: TAP TO BEGINが消えない問題
+
+### 症状
+実機確認で、ゲーム開始後も「TAP TO BEGIN」が画面に残り続ける不具合が発生していた。
+
+### 原因
+`#ui-root { pointer-events: none; }` に対し、`pointer-events: auto` を
+再度有効化するCSSルールが `#ui-root button` にしか定義されておらず、
+`<div class="hvr-start-gate">` はボタンではないため対象外だった。結果として、
+ゲート要素はタップを一切受け取れず、指のタップはゲートを素通りして
+背後のcanvasへ直接届いていた。
+
+これにより:
+- ゲート自身の`pointerdown`ハンドラが一度も発火しない
+- `onBegin()`(BGM再生 + director.begin())が呼ばれない
+- `gate.remove()`も同じハンドラ内にあったため、DOMからも消えない
+
+一方でcanvas側は`engine.start()`により既にタップを受け付けていたため、
+水しぶき等の一部演出だけは反応し、「動いているように見えるのに
+TAP TO BEGINが消えない」という不可解な症状になっていた。
+
+### 修正内容
+CSSだけで隠す実装ではなく、`src/ui.js`の`buildStartGate()`に明示的な
+状態('waiting' / 'hidden')を持たせ、`show()`/`hide()`という状態遷移APIを
+公開する形に変更した。
+
+```js
+export function buildStartGate(uiRoot, promptText, { onBegin }) {
+  let state = 'waiting';
+  function hide() {
+    state = 'hidden';
+    gate.classList.remove('hvr-start-gate-waiting');
+    gate.classList.add('hvr-start-gate-hidden');
+  }
+  gate.addEventListener('pointerdown', () => {
+    if (state !== 'waiting') return; // 状態でも二重にガード
+    hide();
+    onBegin();
+  });
+  return { show, hide, getState: () => state };
+}
+```
+
+CSS側は状態クラスの見た目(フェード)を定義するだけにした。
+
+```css
+.hvr-start-gate-waiting { opacity: 1; pointer-events: auto; }
+.hvr-start-gate-hidden  { opacity: 0; pointer-events: none; transition: opacity 0.35s ease; }
+```
+
+`hide()`が呼ばれるとCSSトランジションでフェードアウトしつつ
+`pointer-events: none`になるため、以後のタップは正しくcanvasへ素通りする
+(ゲートが誤って再度反応することもない)。ループは`.hvr-ui`のみを
+作り直す設計のため(`buildStartGate`はmain.jsで一度だけ生成)、
+一度hideされたゲートはループを跨いでも再表示されない。
+将来「リプレイ待機状態」を導入する場合は、その時点で`gate.show()`を
+呼び出すだけで再表示できる構造にしてある。
+
+### 変更したファイル(今回)
+`style.css`(`.hvr-start-gate`のpointer-events修正+状態クラス追加)／
+`src/ui.js`(`buildStartGate`を状態管理APIへ書き換え)／
+`src/main.js`(新APIの呼び出し形式に合わせて更新)
+
+`engine/`・GitHub版への影響なし(diff完全一致・mtime変化なしを確認済み)。
+
 ## 追加改修: stage-systemへの一般化
 
 `unlock-system.js`を削除して`director-system.js`が直接`unlock:stage`を発火する

@@ -85,18 +85,50 @@ export function buildGameUI(engine, config, uiRoot) {
 // [TikTok版] 録画者が画面収録を開始した後にタップする、開始専用ゲート。
 // ブラウザの自動再生制限を回避するため、実際のpointerdownイベント内で
 // BGM再生とdirector-systemのタイムライン開始を同期的に行う。
-export function buildStartGate(uiRoot, promptText, onBegin) {
+//
+// [不具合修正メモ] 以前はCSS側で`pointer-events`の有効化が漏れており
+// (#ui-rootのpointer-events:noneが.hvr-start-gate(div)にまで継承され、
+// タップがゲートを素通りしてcanvasへ直接届いていた)、ゲート自身の
+// pointerdownが一度も発火せずonBegin()が呼ばれない → BGM/Directorが
+// 開始されないまま「TAP TO BEGIN」表示だけが残り続ける不具合があった。
+//
+// 今回、CSSだけで隠す実装ではなく、明示的な状態('waiting' | 'hidden')を
+// JSで管理し、show()/hide()という状態遷移APIを公開する形に変更した。
+// 状態に応じてCSSクラスを付け替えることで、フェードアウト(見た目)と
+// pointer-events(実際にタップを受け取るか)を確実に同期させている。
+// 将来「リプレイ待機状態」を導入する場合も、この controller.show() を
+// 呼び出すだけで再表示できる。
+export function buildStartGate(uiRoot, promptText, { onBegin }) {
   const gate = document.createElement('div');
-  gate.className = 'hvr-start-gate';
+  gate.className = 'hvr-start-gate hvr-start-gate-waiting';
   gate.innerHTML = `<span class="hvr-start-gate-text">${promptText}</span>`;
   uiRoot.appendChild(gate);
 
-  const remove = () => {
-    gate.remove();
+  let state = 'waiting'; // 'waiting'(表示・タップ受付中) | 'hidden'(非表示・タップ無視)
+
+  function show() {
+    if (state === 'waiting') return;
+    state = 'waiting';
+    gate.classList.remove('hvr-start-gate-hidden');
+    gate.classList.add('hvr-start-gate-waiting');
+  }
+
+  function hide() {
+    if (state === 'hidden') return;
+    state = 'hidden';
+    gate.classList.remove('hvr-start-gate-waiting');
+    gate.classList.add('hvr-start-gate-hidden');
+  }
+
+  gate.addEventListener('pointerdown', () => {
+    // 'waiting'状態のときだけ反応する(非表示中はpointer-events:noneでも
+    // 保護されるが、状態自体でも二重にガードしておく)
+    if (state !== 'waiting') return;
+    hide();
     onBegin();
-  };
-  gate.addEventListener('pointerdown', remove, { once: true });
-  return gate;
+  });
+
+  return { show, hide, getState: () => state };
 }
 
 function buildTitleLogo(root, character) {

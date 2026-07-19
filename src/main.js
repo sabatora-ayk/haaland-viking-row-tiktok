@@ -13,6 +13,8 @@ const uiRoot = document.getElementById('ui-root');
 
 const engine = startShow(canvas, uiRoot);
 
-buildStartGate(uiRoot, gameConfig.visual.ui.startPromptText, () => {
-  engine.beginShow();
+// buildStartGateは内部で状態管理(waiting/hidden)を行い、タップ時に
+// 自身をhide()してからonBeginを呼ぶ(CSSだけで隠す実装にはしていない)。
+buildStartGate(uiRoot, gameConfig.visual.ui.startPromptText, {
+  onBegin: () => engine.beginShow()
 });

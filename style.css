@@ -298,7 +298,10 @@ body {
   font-size: clamp(40px, 17vw, 76px);
 }
 
-/* --- [TikTok版] 開始ゲート --- */
+/* --- [TikTok版] 開始ゲート ---
+   表示/非表示はJS側の状態管理(src/ui.jsのbuildStartGate)がクラスを
+   付け替えることで制御する。CSSはあくまでその状態の見た目(フェード)を
+   定義するだけで、CSSだけで隠す実装にはしていない。 */
 .hvr-start-gate {
   position: absolute;
   inset: 0;
@@ -306,6 +309,17 @@ body {
   align-items: center;
   justify-content: center;
   background: rgba(11, 26, 43, 0.72);
+  transition: opacity 0.35s ease;
+}
+
+.hvr-start-gate-waiting {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hvr-start-gate-hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .hvr-start-gate-text {
