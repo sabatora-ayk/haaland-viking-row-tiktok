@@ -1,0 +1,352 @@
+:root {
+  --tap-ui-primary: #ffd54a;
+  --tap-ui-bg: #0b1a2b;
+  --tap-ui-text: #ffffff;
+  --hvr-red: #c8102e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  touch-action: manipulation;
+  font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+/* [TikTok版] 完全縦画面9:16固定。レスポンシブ対応は不要なため、
+   ビューポートがどんな比率でも常に9:16を維持し、余白は黒でレターボックスする。
+   100vh/100vwは使わず、iOS Safariのアドレスバー変動問題を避けるため
+   100%基準で計算する。 */
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-width: calc(100vh * 9 / 16);
+  max-height: calc(100vw * 16 / 9);
+  aspect-ratio: 9 / 16;
+  margin: 0 auto;
+  background: #000;
+  overflow: hidden;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+#ui-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* ループ復帰時の一瞬のフェード(#game-root全体を暗転させ、自然な繋がりを出す) */
+#game-root.hvr-loop-fade {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#ui-root button {
+  pointer-events: auto;
+}
+
+/* ================= Haaland Viking Row 専用UI(GitHub版デザインを踏襲) ================= */
+
+.hvr-ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* --- タイトルロゴ --- */
+.hvr-logo {
+  position: absolute;
+  top: max(env(safe-area-inset-top, 16px), 16px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+  text-shadow:
+    2px 2px 0 var(--hvr-red),
+    -2px 2px 0 var(--hvr-red),
+    2px -2px 0 var(--hvr-red),
+    -2px -2px 0 var(--hvr-red),
+    0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+.hvr-logo-line1,
+.hvr-logo-line2 {
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 4px;
+}
+
+.hvr-logo-line1 {
+  font-size: clamp(22px, 7.5vw, 34px);
+}
+
+.hvr-logo-line2 {
+  font-size: clamp(15px, 5vw, 22px);
+  color: var(--tap-ui-primary);
+  letter-spacing: 6px;
+  margin-top: 2px;
+}
+
+/* --- スコアボード --- */
+.hvr-scoreboard {
+  position: absolute;
+  top: max(env(safe-area-inset-top, 16px), 16px);
+  left: 14px;
+  right: 14px;
+  margin-top: 62px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: "Courier New", monospace;
+  color: var(--tap-ui-text);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
+  transform-origin: left top;
+}
+
+.hvr-scoreboard-pulse {
+  animation: hvr-pulse 220ms ease-out;
+}
+
+.hvr-stat-block {
+  display: flex;
+  flex-direction: column;
+  min-width: 72px;
+}
+
+.hvr-stat-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  opacity: 0.75;
+}
+
+.hvr-stat-value {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--tap-ui-primary);
+}
+
+.hvr-stat-block-combo .hvr-stat-value {
+  color: var(--hvr-red);
+  -webkit-text-stroke: 0.5px #ffffff;
+}
+
+.hvr-power {
+  flex: 1;
+  min-width: 90px;
+}
+
+.hvr-power-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  opacity: 0.75;
+  display: block;
+  margin-bottom: 3px;
+}
+
+.hvr-power-bar {
+  width: 100%;
+  height: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.hvr-power-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--hvr-red), var(--tap-ui-primary));
+  transition: width 120ms linear;
+}
+
+/* --- 常設 TAP TO ROW バナー --- */
+.hvr-tap-prompt {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(env(safe-area-inset-bottom, 22px), 22px);
+  text-align: center;
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  font-size: clamp(18px, 6.5vw, 30px);
+  letter-spacing: 4px;
+  color: #ffffff;
+  text-shadow: 0 0 10px var(--tap-ui-primary), 0 3px 6px rgba(0, 0, 0, 0.7);
+  animation: hvr-tap-prompt-pulse 1.3s ease-in-out infinite;
+}
+
+/* --- タップ時の全画面フラッシュ --- */
+.hvr-tap-flash {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.25);
+  opacity: 0;
+}
+
+.hvr-tap-flash-active {
+  animation: hvr-flash-fade 180ms ease-out;
+}
+
+/* --- BALLON D'OR フィナーレバナー --- */
+.hvr-ballon-dor {
+  position: absolute;
+  top: 40%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  font-size: clamp(28px, 11vw, 50px);
+  letter-spacing: 3px;
+  color: var(--tap-ui-primary);
+  text-shadow:
+    0 0 12px rgba(255, 213, 74, 0.9),
+    0 0 30px rgba(255, 213, 74, 0.6),
+    0 4px 0 #8a5a00;
+  opacity: 0;
+  transform: scale(0.6);
+  pointer-events: none;
+}
+
+.hvr-ballon-dor-active {
+  animation: hvr-ballon-dor-pop 900ms cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
+}
+
+/* --- [TikTok版] 巨大字幕オーバーレイ(冒頭の煽り文句/TAP!/ROW!!/FASTER!!/
+   🔥FIRE/⚡THUNDER/🌌AURORA/👑LEGEND/🏆victoryTitle等) --- */
+.hvr-caption {
+  position: absolute;
+  top: 58%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  letter-spacing: 2px;
+  font-size: clamp(30px, 13vw, 60px);
+  opacity: 0;
+  transform: scale(0.7);
+  -webkit-text-stroke: 2px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 6px 10px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  padding: 0 12px;
+}
+
+.hvr-caption-active {
+  animation: hvr-caption-pop 260ms cubic-bezier(0.2, 1.5, 0.4, 1) forwards, hvr-caption-fade 260ms ease-in 900ms forwards;
+}
+
+.hvr-caption-normal { color: #ffffff; }
+.hvr-caption-hype { color: var(--tap-ui-primary); }
+.hvr-caption-fire { color: #ff6a2b; }
+.hvr-caption-thunder { color: #ffffff; }
+.hvr-caption-aurora { color: #b98cff; }
+.hvr-caption-legend {
+  color: #ffcf6b;
+  text-shadow: 0 0 16px rgba(255, 213, 74, 0.7), 0 6px 10px rgba(0, 0, 0, 0.6);
+}
+.hvr-caption-gold {
+  color: var(--tap-ui-primary);
+  font-size: clamp(34px, 15vw, 68px);
+  top: 50%;
+}
+.hvr-caption-cta {
+  color: #ffffff;
+  font-size: clamp(22px, 8vw, 36px);
+  letter-spacing: 1px;
+  top: 66%;
+}
+
+/* 冒頭の煽り文句(長文)専用: 小さめのサイズで2行程度に収まるよう調整し、
+   離脱を防ぐための「予告編」的なタイトルカードとして見せる */
+.hvr-caption-question {
+  color: #ffffff;
+  font-size: clamp(20px, 7.5vw, 30px);
+  line-height: 1.3;
+  top: 36%;
+  letter-spacing: 1px;
+  text-shadow: 0 0 14px rgba(255, 213, 74, 0.5), 0 4px 8px rgba(0, 0, 0, 0.7);
+}
+
+/* bigフラグ指定時の強調(短いクライマックス系字幕にのみ使用する想定)。
+   tone別ルールより後に定義することで、同じ詳細度でも上書きされるようにしている。 */
+.hvr-caption-big {
+  font-size: clamp(40px, 17vw, 76px);
+}
+
+/* --- [TikTok版] 開始ゲート --- */
+.hvr-start-gate {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 26, 43, 0.72);
+}
+
+.hvr-start-gate-text {
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  font-size: clamp(22px, 8vw, 36px);
+  letter-spacing: 3px;
+  color: #ffffff;
+  text-shadow: 0 0 14px var(--tap-ui-primary), 0 4px 8px rgba(0, 0, 0, 0.7);
+  animation: hvr-tap-prompt-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes hvr-pulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+@keyframes hvr-tap-prompt-pulse {
+  0%, 100% { opacity: 1; transform: translateY(0); }
+  50% { opacity: 0.55; transform: translateY(-4px); }
+}
+
+@keyframes hvr-flash-fade {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes hvr-ballon-dor-pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes hvr-caption-pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes hvr-caption-fade {
+  0% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.9); }
+}
