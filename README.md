@@ -101,6 +101,159 @@ const handlers = {
 
 ---
 
+## 設計レビュー: TAP TO BEGINが消えない問題(3回目・原因特定と再設計)
+
+推測によるCSS修正を重ねてもなお実機で再現するとの報告を受け、今回は
+修正を急がず、要求された5項目の調査を全文検索によって行った。
+
+### 1. "TAP TO BEGIN"という文字列の生成箇所(全文検索結果)
+`grep -rn "TAP TO BEGIN"`の結果、`config/game-config.js`の
+`startPromptText: 'TAP TO BEGIN'`のみが定義元。参照(読み取り)は
+`src/main.js`の`buildStartGate(uiRoot, gameConfig.visual.ui.startPromptText, ...)`
+の1箇所のみだった。
+
+### 2. ".hvr-start-gate"の生成箇所(全文検索結果)
+`grep -rn "hvr-start-gate"`の結果、実際に要素へこのクラスを付与している
+コードは`src/ui.js`の`gate.className = 'hvr-start-gate hvr-start-gate-waiting'`
+1箇所のみ。他はCSS定義とコメント・console.log文字列だった。
+
+### 3. innerHTML/insertAdjacentHTML/appendChild/cloneNode/createElementの全検索
+`createElement`はプロジェクト全体で`src/ui.js`(8箇所、gate以外はロゴ/
+スコアボード/バナー等)と`engine/ui-manager.js`(HUD/エンド画面用)に存在した。
+後者は`TapEngine`のコンストラクタで無条件にインスタンス化されるが、
+`buildHud()`・`'ui:show-end-screen'`のいずれもTikTok版のどこからも
+呼び出し/発火されていないことを別途確認し(該当検索0件)、
+"TAP TO BEGIN"生成には無関係と判断した。`insertAdjacentHTML`・`cloneNode`は
+プロジェクト全体で0件。
+
+### 4. "TAP TO BEGIN" DOMが生成されうる経路の図
+```
+main.js(モジュール読み込み時に1回だけ実行)
+  ├─ startShow(canvas, uiRoot)
+  │    ├─ new TapEngine → new UIManager(uiRoot,bus) ※buildHud()未呼び出しのためDOM生成なし
+  │    ├─ buildGameUI(...) → '.hvr-ui'配下に各種要素を生成("TAP TO BEGIN"は含まない)
+  │    └─ engine.start()
+  └─ buildStartGate(uiRoot, 'TAP TO BEGIN', {onBegin}) ★唯一の生成経路
+
+loop()(35秒ごとにdirector→game.jsのonLoop経由で実行)
+  └─ startShow(canvas, uiRoot)を再実行
+       ├─ buildGameUI(...)は再実行される('.hvr-ui'を作り直す)
+       └─ buildStartGate(...)は再実行されない ★ループのたびに増えない
+```
+静的解析上、"TAP TO BEGIN"のDOMノードはアプリのライフタイム全体で
+理論上1個しか生成されない。
+
+### 5. hide()操作対象と表示DOMの同一性の証明
+`gate`は`buildStartGate`のローカル変数であり、生成・DOM挿入・`hide()`内での
+操作・`pointerdown`ハンドラでの呼び出しは全て同一クロージャ内の同一参照。
+JS変数束縛の観点からは100%同一であることが証明できる。また「Directorが
+最後まで正常動作する」という報告自体が、`onBegin()`(directorを開始する
+唯一の経路)が実行された証拠であり、これはgateの`pointerdown`が確実に
+発火し`hide()`が確実に呼ばれたことの論理的な裏付けになる。
+
+一方で、**「JS上どの変数を操作しているか」は証明できても、「Safari実機が
+その操作を正しく描画へ反映しているか」は静的解析だけでは証明できない**、
+という限界を認めた。ご指示に従い、この不確実性自体を構造的に排除する方向で
+UI生成設計を作り直した。
+
+### 再設計の内容
+
+1. **idempotent化**: `buildStartGate`は生成前に同一id
+   (`#hvr-start-gate-singleton`)の要素が存在すれば必ず全て削除してから
+   新規作成する。呼び出し回数を信用せず、DOM上は常に高々1個しか
+   存在しない状態を構造的に保証する。
+2. **display:noneではなく実際にDOM ツリーからremove()する**: 「不可視だが
+   存在する」という中間状態を一切作らない。フェードは見た目の演出として
+   CSSトランジションで行うが、状態確定は必ず`gate.remove()`によるDOM完全
+   撤去で行う(`transitionend`を主経路、`setTimeout`を未発火環境向け
+   フォールバックとした二重トリガー)。
+3. **`window.__hvrStartGate`としてライブ参照を公開**: 実機のSafari Web
+   Inspectorのコンソールから`window.__hvrStartGate`(現在の要素、nullなら
+   削除済み)や`document.querySelectorAll('.hvr-start-gate').length`を
+   直接確認できるようにした。
+4. **キャッシュバスティング**(`index.html`): `src/main.js?v=20260719c` /
+   `style.css?v=20260719c`のようにバージョンクエリを付与し、Safariが
+   古いJS/CSSをキャッシュから読み込み続けている可能性も併せて排除した。
+   実機検証時は設定アプリからSafariの履歴とWebサイトデータを消去する
+   ことも推奨する。
+
+### 変更したファイル(今回)
+`src/ui.js`(`buildStartGate`をidempotent+remove()方式へ全面再設計)／
+`src/main.js`(コメント更新のみ、戻り値の扱いに変更なし)／
+`index.html`(キャッシュバスティングクエリ追加)
+
+`engine/`・GitHub版への影響なし(diff完全一致・mtime変化なしを確認済み)。
+
+## 追加調査: TAP TO BEGINが依然として消えない問題(2回目)
+
+実機再検証の結果、1回目の修正(pointer-events未設定)は正しかったものの、
+「Directorは最後まで正常動作するのに、TAP TO BEGINのテキストだけが
+画面に残り続ける」症状が再発した。今回は推測を避け、DOMツリー生成箇所と
+UIライフサイクルをコードから追跡して原因を切り分けた。
+
+### 確認項目への回答
+
+**1. buildStartGate()で生成したDOM要素は何個か**
+`grep -rn "buildStartGate("`で全文検索した結果、呼び出し箇所は`src/main.js`の
+1行のみ。`src/game.js`の`loop()`は`.hvr-ui`クラスの要素のみを
+`querySelectorAll('.hvr-ui').forEach(el => el.remove())`で再生成しており、
+`buildStartGate`は呼んでいない。→ **生成されるのは常に1個のみ**
+
+**2. hide()が操作しているelementと画面表示中のelementが同一か**
+`show()`/`hide()`はいずれも`buildStartGate()`のクロージャ内で作られた
+同一の`gate`変数のみを参照しており、別要素を誤って操作しているコードパスは
+存在しなかった。
+
+**3. UI再生成時に新しいStartGateが生成されていないか**
+上記1の通り、`loop()`はStartGateに一切触れない設計になっており、
+再生成は発生しない。
+
+**4/5. 実機で確認できる診断ログを追加**
+コード上は問題が見当たらなかったため、`hide()`実行時に要求された
+`console.log(element)` / `console.log(element.className)` /
+`console.log(element.style)` に加え、`getComputedStyle()`による
+実際の描画値(opacity/pointer-events/display)と
+`document.querySelectorAll(".hvr-start-gate").length`を出力するよう
+`src/ui.js`に恒久的な診断ログ(`START_GATE_DEBUG`フラグで on/off 可能)を追加した。
+
+### コードレビューで見つけた実際の疑わしい箇所
+
+DOM生成自体には問題がなかったが、CSSを1行ずつ確認したところ、
+`.hvr-start-gate-text`(テキストのspan要素)に**独自の無限アニメーション**
+(`hvr-tap-prompt-pulse`によるopacity 1↔0.55の点滅)が付いていることが分かった。
+親の`.hvr-start-gate`はopacityを**トランジション**で0にする一方、
+子要素は**アニメーション**で独自にopacityを操作し続けており、この
+「親のopacityトランジション × 子の独立したopacityアニメーション」の
+組み合わせは、一部のモバイルブラウザ実装で合成結果が正しく透明化されない
+既知の問題領域である。静的なコードレビューだけでは100%の断定はできないため、
+これを有力な原因候補として扱い、以下の防御的な修正を行った。
+
+### 修正内容
+
+1. **hidden状態で子アニメーションを明示的に停止**(`style.css`)
+   ```css
+   .hvr-start-gate-hidden .hvr-start-gate-text {
+     animation: none;
+     opacity: 0;
+   }
+   ```
+
+2. **opacity/pointer-eventsだけに頼らない二重対策**(`src/ui.js`)
+   `hide()`実行後、CSSトランジション完了を`transitionend`で検知し(未発火環境
+   向けに`setTimeout`もフォールバックとして併走)、`gate.style.display = 'none'`
+   を直接設定して描画・ヒットテスト対象から完全に除外するようにした。
+   `show()`側では`display`を明示的に復帰させてからクラスを戻す。
+
+3. **pointerdownに加えclickもフォールバックで受け付け**(`src/ui.js`)
+   TikTokアプリ内ブラウザ等、pointerdownの挙動が環境依存になりうる
+   ケースへの耐性として追加。`state`ガードにより二重発火はしない。
+
+### 変更したファイル(今回)
+`src/ui.js`(診断ログ追加、display:noneによる二重対策、clickフォールバック)／
+`style.css`(hidden状態での子アニメーション停止ルール追加)
+
+`engine/`・GitHub版への影響なし(diff完全一致・mtime変化なしを確認済み)。
+
 ## 不具合修正: TAP TO BEGINが消えない問題
 
 ### 症状

@@ -322,6 +322,17 @@ body {
   pointer-events: none;
 }
 
+/* [不具合対策] .hvr-start-gate-textは独自のopacityアニメーション
+   (hvr-tap-prompt-pulse)を持っているため、hidden状態では明示的に
+   停止する。親のopacityトランジションと子の独自アニメーションが
+   同時に走ると、一部のモバイル実装で合成結果が正しく透明化されない
+   ことがあるため、hidden時は子アニメーションそのものを止めて
+   opacityを固定値0にする。 */
+.hvr-start-gate-hidden .hvr-start-gate-text {
+  animation: none;
+  opacity: 0;
+}
+
 .hvr-start-gate-text {
   font-family: "Courier New", monospace;
   font-weight: 900;

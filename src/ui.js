@@ -86,49 +86,105 @@ export function buildGameUI(engine, config, uiRoot) {
 // ブラウザの自動再生制限を回避するため、実際のpointerdownイベント内で
 // BGM再生とdirector-systemのタイムライン開始を同期的に行う。
 //
-// [不具合修正メモ] 以前はCSS側で`pointer-events`の有効化が漏れており
-// (#ui-rootのpointer-events:noneが.hvr-start-gate(div)にまで継承され、
-// タップがゲートを素通りしてcanvasへ直接届いていた)、ゲート自身の
-// pointerdownが一度も発火せずonBegin()が呼ばれない → BGM/Directorが
-// 開始されないまま「TAP TO BEGIN」表示だけが残り続ける不具合があった。
+// [設計レビューの結論]
+// 全文検索の結果、"TAP TO BEGIN"を生成するコードパスはbuildStartGate()の
+// 1箇所のみで、hide()が操作するDOM参照とappendChildしたDOM参照はJS上
+// 同一クロージャ変数(gate)であることをコードから証明できた。一方、
+// 「JS上どの変数を操作しているか」は証明できても、「実機がその操作を
+// 正しく描画へ反映しているか」は静的解析だけでは証明できないと判断し、
+// その不確実性自体を構造的に無くす設計へ作り直した。
 //
-// 今回、CSSだけで隠す実装ではなく、明示的な状態('waiting' | 'hidden')を
-// JSで管理し、show()/hide()という状態遷移APIを公開する形に変更した。
-// 状態に応じてCSSクラスを付け替えることで、フェードアウト(見た目)と
-// pointer-events(実際にタップを受け取るか)を確実に同期させている。
-// 将来「リプレイ待機状態」を導入する場合も、この controller.show() を
-// 呼び出すだけで再表示できる。
+//   (1) idempotent化: 生成前に同一idの要素が残っていれば必ず削除してから
+//       作る。呼び出しが複数回発生しても、DOM上は常に高々1個しか
+//       存在しない状態を保証する(呼び出し回数を信用しない設計)。
+//   (2) 非表示は display:none ではなく実際に DOM ツリーから remove()
+//       する。「不可視だが存在する」という中間状態を作らないことで、
+//       "見えているのに操作対象と一致しない"という疑いの余地そのものを
+//       無くす。フェードは見た目の演出として残しつつ、状態確定は
+//       常に実DOM削除で行う。
+//   (3) window.__hvrStartGateとしてライブ参照を公開し、実機のSafari
+//       Web Inspectorから `window.__hvrStartGate` /
+//       `document.querySelectorAll('.hvr-start-gate')` を直接
+//       いつでも確認できるようにした。
+const START_GATE_ID = 'hvr-start-gate-singleton';
+const START_GATE_FADE_MS = 350;
+
 export function buildStartGate(uiRoot, promptText, { onBegin }) {
+  // idempotent化: 同一idの要素が(理由を問わず)既に存在するなら、
+  // 新しく作る前に必ず全て削除する。呼び出し回数に依存しない設計にする。
+  document.querySelectorAll(`#${START_GATE_ID}`).forEach((el) => el.remove());
+
   const gate = document.createElement('div');
+  gate.id = START_GATE_ID;
   gate.className = 'hvr-start-gate hvr-start-gate-waiting';
   gate.innerHTML = `<span class="hvr-start-gate-text">${promptText}</span>`;
   uiRoot.appendChild(gate);
 
-  let state = 'waiting'; // 'waiting'(表示・タップ受付中) | 'hidden'(非表示・タップ無視)
+  // 実機のリモートデバッガから直接確認できるようライブ参照を公開する。
+  // Safari Web Inspectorのコンソールで以下を実行すれば実態を確認できる:
+  //   window.__hvrStartGate            → 現在のgate要素そのもの(nullなら削除済み)
+  //   document.querySelectorAll('.hvr-start-gate').length → 実際の個数
+  window.__hvrStartGate = gate;
 
-  function show() {
-    if (state === 'waiting') return;
-    state = 'waiting';
-    gate.classList.remove('hvr-start-gate-hidden');
-    gate.classList.add('hvr-start-gate-waiting');
+  let state = 'waiting'; // 'waiting'(表示・タップ受付中) | 'removed'(DOMから完全撤去済み)
+  let removeTimer = null;
+
+  function logState(label) {
+    console.log(`[start-gate] ${label}`, {
+      state,
+      inDocument: document.body.contains(gate),
+      totalMatchingId: document.querySelectorAll(`#${START_GATE_ID}`).length,
+      totalMatchingClass: document.querySelectorAll('.hvr-start-gate').length
+    });
   }
 
   function hide() {
-    if (state === 'hidden') return;
-    state = 'hidden';
+    if (state !== 'waiting') return;
+    state = 'removing';
     gate.classList.remove('hvr-start-gate-waiting');
-    gate.classList.add('hvr-start-gate-hidden');
+    gate.classList.add('hvr-start-gate-hidden'); // 見た目上のフェードのみ担当
+    logState('hide()呼び出し(フェード開始)');
+
+    // フェード完了を待ってから実際にDOMツリーから撤去する。
+    // display:noneのような「不可視だが存在する」中間状態を残さないため、
+    // 最終的な状態確定は必ずremove()で行う(transitionendを主経路、
+    // setTimeoutを未発火環境向けフォールバックとした二重トリガー)。
+    let finalized = false;
+    const finalize = () => {
+      if (finalized) return;
+      finalized = true;
+      gate.removeEventListener('transitionend', onTransitionEnd);
+      clearTimeout(removeTimer);
+      gate.remove();
+      state = 'removed';
+      if (window.__hvrStartGate === gate) window.__hvrStartGate = null;
+      logState('remove()実行後(DOMから完全撤去)');
+    };
+    const onTransitionEnd = (e) => {
+      if (e.target === gate && e.propertyName === 'opacity') finalize();
+    };
+    gate.addEventListener('transitionend', onTransitionEnd);
+    removeTimer = setTimeout(finalize, START_GATE_FADE_MS + 100);
   }
 
-  gate.addEventListener('pointerdown', () => {
-    // 'waiting'状態のときだけ反応する(非表示中はpointer-events:noneでも
-    // 保護されるが、状態自体でも二重にガードしておく)
+  const onTapAttempt = () => {
     if (state !== 'waiting') return;
     hide();
     onBegin();
-  });
+  };
+  // pointerdownを主経路としつつ、pointerdownの挙動が不安定な環境向けに
+  // clickもフォールバックとして受け付ける。stateガードにより二重発火はしない。
+  gate.addEventListener('pointerdown', onTapAttempt);
+  gate.addEventListener('click', onTapAttempt);
 
-  return { show, hide, getState: () => state };
+  logState('生成直後');
+
+  return {
+    getState: () => state,
+    // 将来「リプレイ待機状態」等で再表示が必要になった場合は、
+    // buildStartGateを再度呼び出して新しいゲートを作ればよい
+    // (idempotent化により古い要素が残る心配はない)。
+  };
 }
 
 function buildTitleLogo(root, character) {

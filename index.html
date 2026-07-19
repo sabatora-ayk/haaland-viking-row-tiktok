@@ -5,13 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>HAALAND VIKING ROW - TikTok Recording Edition</title>
 <meta name="description" content="TikTok投稿用の縦動画専用版。画面収録するだけで、タップするほど演出がエスカレートするバイキング船漕ぎ動画が撮影できます。">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20260719c">
 </head>
 <body>
   <div id="game-root">
     <canvas id="game-canvas"></canvas>
     <div id="ui-root"></div>
   </div>
-  <script type="module" src="src/main.js"></script>
+  <!-- [デバッグ用メモ] Safari実機で修正が反映されない場合、キャッシュされた
+       古いJS/CSSが読み込まれている可能性を排除するため、バージョンクエリを
+       付与している。検証時は設定アプリ→Safari→履歴とWebサイトデータを
+       消去、または対象タブを完全に閉じてから開き直すことを推奨する。 -->
+  <script type="module" src="src/main.js?v=20260719c"></script>
 </body>
 </html>

@@ -13,8 +13,9 @@ const uiRoot = document.getElementById('ui-root');
 
 const engine = startShow(canvas, uiRoot);
 
-// buildStartGateは内部で状態管理(waiting/hidden)を行い、タップ時に
-// 自身をhide()してからonBeginを呼ぶ(CSSだけで隠す実装にはしていない)。
+// buildStartGateは内部でidempotentな生成(既存要素があれば必ず削除してから
+// 作る)と、タップ時のremove()による完全なDOM撤去を行う
+// (display:noneのような「不可視だが存在する」中間状態を作らない設計)。
 buildStartGate(uiRoot, gameConfig.visual.ui.startPromptText, {
   onBegin: () => engine.beginShow()
 });
